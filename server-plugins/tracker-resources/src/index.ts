@@ -18,9 +18,11 @@ import { Person } from '@hcengineering/contact'
 import core, {
   concatLink,
   Doc,
+  DocumentQuery,
   DocumentUpdate,
   Ref,
   Space,
+  Status,
   Tx,
   TxCreateDoc,
   TxCUD,
@@ -504,13 +506,50 @@ async function issueLinkIdProvider (issue: Issue): Promise<string> {
   return issue.identifier
 }
 
+/**
+ * Aggregate total time spent grouped by issue status.
+ *
+ * @public
+ */
+export async function aggregateTimeSpentByStatus (
+  control: TriggerControl,
+  query: DocumentQuery<Issue>
+): Promise<Map<Ref<Status>, number>> {
+  const issues = await control.findAll(control.ctx, tracker.class.Issue, query)
+  const statusByIssue = new Map<Ref<Issue>, Ref<Status>>()
+  const issueIds: Array<Ref<Issue>> = []
+
+  for (const issue of issues) {
+    statusByIssue.set(issue._id, issue.status)
+    issueIds.push(issue._id)
+  }
+
+  const result = new Map<Ref<Status>, number>()
+  if (issueIds.length === 0) {
+    return result
+  }
+
+  const reports = await control.findAll(control.ctx, tracker.class.TimeSpendReport, {
+    attachedTo: { $in: issueIds }
+  })
+
+  for (const report of reports) {
+    const status = statusByIssue.get(report.attachedTo)
+    if (status === undefined) continue
+    result.set(status, (result.get(status) ?? 0) + report.value)
+  }
+
+  return result
+}
+
 // eslint-disable-next-line @typescript-eslint/explicit-function-return-type
 export default async () => ({
   function: {
     IssueHTMLPresenter: issueHTMLPresenter,
     IssueTextPresenter: issueTextPresenter,
     IssueNotificationContentProvider: getIssueNotificationContent,
-    IssueLinkIdProvider: issueLinkIdProvider
+    IssueLinkIdProvider: issueLinkIdProvider,
+    AggregateTimeSpentByStatus: aggregateTimeSpentByStatus
   },
   trigger: {
     OnIssueUpdate,
